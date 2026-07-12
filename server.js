@@ -17,6 +17,7 @@ if (!fs.existsSync('data')) fs.mkdirSync('data');
 if (!fs.existsSync('public/uploads')) fs.mkdirSync('public/uploads', { recursive: true });
 
 const REPORTS_FILE = path.join(__dirname, 'data', 'reports.json');
+const USERS_FILE = path.join(__dirname, 'data', 'users.json');
 const TWO_WEEKS = 14 * 24 * 60 * 60 * 1000; // 14 days in ms
 const CLEANED_DELAY = 24 * 60 * 60 * 1000;   // 24 hours in ms
 
@@ -125,6 +126,13 @@ app.post('/api/reports/:id/cleaned', upload.single('photo'), (req, res) => {
   res.json(report);
 });
 
+// --- GET current user’s nickname ---
+app.get('/api/user', authMiddleware, (req, res) => {
+  const uid = req.user.uid;
+  const users = getData(USERS_FILE);
+  const user = users.find(u => u.uid === uid);
+  res.json({ nickname: user ? user.nickname : null });
+});
 // Start server
 app.listen(PORT, () => {
   console.log(`CleanSweep backend running on http://localhost:${PORT}`);
