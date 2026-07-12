@@ -4,6 +4,17 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const admin = require('firebase-admin');
+
+let firebaseApp;
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  firebaseApp = admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount)
+  });
+} else {
+  console.warn('⚠️ FIREBASE_SERVICE_ACCOUNT env variable not set. Auth will fail.');
+}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,7 +28,7 @@ if (!fs.existsSync('data')) fs.mkdirSync('data');
 if (!fs.existsSync('public/uploads')) fs.mkdirSync('public/uploads', { recursive: true });
 
 const REPORTS_FILE = path.join(__dirname, 'data', 'reports.json');
-const USERS_FILE = path.join(__dirname, 'data', 'users.json');
+const USERS_FILE = path.join(__dirname, 'data', 'users.json');   // NEW
 const TWO_WEEKS = 14 * 24 * 60 * 60 * 1000; // 14 days in ms
 const CLEANED_DELAY = 24 * 60 * 60 * 1000;   // 24 hours in ms
 
@@ -124,6 +135,52 @@ app.post('/api/reports/:id/cleaned', upload.single('photo'), (req, res) => {
   report.deletionTime = Date.now() + CLEANED_DELAY;
   saveReports(reports);
   res.json(report);
+});
+async function authMiddleware(req, res, next) {
+  if (!firebaseApp) {
+    return res.status(500).json({ error: 'Firebase auth not configured' });
+  }
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const idToken = authHeader.split('Bearer ')[1];
+  try {
+    const decodedToken = await firebaseApp.auth().verifyIdToken(idToken);
+    req.user = decodedToken;
+    next();
+  } catch (error) {
+    console.error('Token verification failed:', error);
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+}
+// --- GET current user’s nickname ---
+app.get('/api/user', authMiddleware, (req, res) => {
+  const uid = req.user.uid;
+  const users = getData(USERS_FILE);
+  const user = users.find(u => u.uid === uid);
+  res.json({ nickname: user ? user.nickname : null });
+});
+// --- User registration (nickname) ---
+app.post('/api/users', authMiddleware, (req, res) => {
+  const { nickname } = req.body;
+  if (!nickname || nickname.trim().length === 0) {
+    return res.status(400).json({ error: 'Nickname required' });
+  }
+  const uid = req.user.uid;
+  let users = getData(USERS_FILE);
+  // Check if nickname already taken by another user
+  if (users.some(u => u.nickname === nickname.trim() && u.uid !== uid)) {
+    return res.status(409).json({ error: 'Nickname already taken' });
+  }
+  const existingUser = users.find(u => u.uid === uid);
+  if (existingUser) {
+    existingUser.nickname = nickname.trim();
+  } else {
+    users.push({ uid, nickname: nickname.trim() });
+  }
+  saveData(USERS_FILE, users);
+  res.json({ success: true, nickname: nickname.trim() });
 });
 
 // --- GET current user’s nickname ---
