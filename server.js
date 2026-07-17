@@ -4,18 +4,7 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const admin = require('firebase-admin');
-
-// ---- INITIALIZE FIREBASE ADMIN ----
-let firebaseApp;
-if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-  firebaseApp = admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-  });
-} else {
-  console.warn('⚠️ FIREBASE_SERVICE_ACCOUNT env variable not set. Auth will fail.');
-}
+const https = require('https');  // or node-fetch if preferred, but using built-in
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -53,19 +42,53 @@ function cleanReports(reports) {
   });
 }
 
-// ---- AUTH MIDDLEWARE ----
+// ---- VERIFY FIREBASE TOKEN (REST call, no admin SDK) ----
+const FIREBASE_API_KEY = process.env.FIREBASE_API_KEY;
+
+async function verifyIdToken(idToken) {
+  if (!FIREBASE_API_KEY) throw new Error('Missing FIREBASE_API_KEY');
+  const url = `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_API_KEY}`;
+  const body = JSON.stringify({ idToken });
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          if (json.error) {
+            reject(new Error(json.error.message));
+          } else {
+            // The user info is in json.users[0]
+            resolve(json.users[0]);
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+// ---- AUTH MIDDLEWARE (uses REST verification) ----
 async function authMiddleware(req, res, next) {
-  if (!firebaseApp) {
-    return res.status(500).json({ error: 'Firebase auth not configured' });
-  }
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   const idToken = authHeader.split('Bearer ')[1];
   try {
-    const decodedToken = await firebaseApp.auth().verifyIdToken(idToken);
-    req.user = decodedToken;
+    const userInfo = await verifyIdToken(idToken);
+    req.user = userInfo;   // contains uid, email, etc.
     next();
   } catch (error) {
     console.error('Token verification failed:', error);
@@ -85,44 +108,21 @@ const upload = multer({ storage });
 
 // ========== ROUTES ==========
 
-// --- User registration (nickname) ---
-app.post('/api/users', authMiddleware, (req, res) => {
-  const { nickname } = req.body;
-  if (!nickname || nickname.trim().length === 0) {
-    return res.status(400).json({ error: 'Nickname required' });
-  }
-  const uid = req.user.uid;
-  let users = getData(USERS_FILE);
-  if (users.some(u => u.nickname === nickname.trim() && u.uid !== uid)) {
-    return res.status(409).json({ error: 'Nickname already taken' });
-  }
-  const existingUser = users.find(u => u.uid === uid);
-  if (existingUser) {
-    existingUser.nickname = nickname.trim();
-  } else {
-    users.push({ uid, nickname: nickname.trim() });
-  }
-  saveData(USERS_FILE, users);
-  res.json({ success: true, nickname: nickname.trim() });
-});
+app.get('/ping', (req, res) => res.send('pong'));
 
-// --- GET current user’s nickname ---
-app.get('/api/user', (req, res) => {
-  res.json({ nickname: null, test: 'route is live' });
-});
-  const uid = req.user.uid;
+app.get('/api/user', authMiddleware, (req, res) => {
+  const uid = req.user.localId;  // 'localId' is the UID in the REST response
   const users = getData(USERS_FILE);
   const user = users.find(u => u.uid === uid);
   res.json({ nickname: user ? user.nickname : null });
 });
 
-// --- User registration (nickname) ---
 app.post('/api/users', authMiddleware, (req, res) => {
   const { nickname } = req.body;
   if (!nickname || nickname.trim().length === 0) {
     return res.status(400).json({ error: 'Nickname required' });
   }
-  const uid = req.user.uid;
+  const uid = req.user.localId;
   let users = getData(USERS_FILE);
   if (users.some(u => u.nickname === nickname.trim() && u.uid !== uid)) {
     return res.status(409).json({ error: 'Nickname already taken' });
@@ -137,12 +137,11 @@ app.post('/api/users', authMiddleware, (req, res) => {
   res.json({ success: true, nickname: nickname.trim() });
 });
 
-// --- Create report (protected) ---
 app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
   const { lat, lng, address, time } = req.body;
   if (!req.file) return res.status(400).json({ error: 'No photo uploaded' });
 
-  const uid = req.user.uid;
+  const uid = req.user.localId;
   const users = getData(USERS_FILE);
   const user = users.find(u => u.uid === uid);
   const nickname = user ? user.nickname : 'Anonymous';
@@ -167,11 +166,10 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
   res.status(201).json(newReport);
 });
 
-// --- Add comment (protected) ---
 app.post('/api/reports/:id/comments', authMiddleware, (req, res) => {
   const { id } = req.params;
   const { text } = req.body;
-  const uid = req.user.uid;
+  const uid = req.user.localId;
   const users = getData(USERS_FILE);
   const user = users.find(u => u.uid === uid);
   const author = user ? user.nickname : 'Anonymous';
@@ -185,12 +183,11 @@ app.post('/api/reports/:id/comments', authMiddleware, (req, res) => {
   res.json(report);
 });
 
-// --- Mark as cleaned (protected) ---
 app.post('/api/reports/:id/cleaned', authMiddleware, upload.single('photo'), (req, res) => {
   const { id } = req.params;
   if (!req.file) return res.status(400).json({ error: 'No photo uploaded' });
 
-  const uid = req.user.uid;
+  const uid = req.user.localId;
   const users = getData(USERS_FILE);
   const user = users.find(u => u.uid === uid);
   const nickname = user ? user.nickname : 'Anonymous';
@@ -209,7 +206,6 @@ app.post('/api/reports/:id/cleaned', authMiddleware, upload.single('photo'), (re
   res.json(report);
 });
 
-// --- Public: get reports (no auth) ---
 app.get('/api/reports', (req, res) => {
   let reports = getData(REPORTS_FILE);
   const cleanedReports = cleanReports(reports);
@@ -219,7 +215,7 @@ app.get('/api/reports', (req, res) => {
   res.json(cleanedReports);
 });
 
-// --- Start server ---
+// ---- START SERVER ----
 app.listen(PORT, () => {
   console.log(`CleanSweep backend running on http://localhost:${PORT}`);
   let reports = getData(REPORTS_FILE);
