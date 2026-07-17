@@ -114,6 +114,27 @@ app.get('/api/user', authMiddleware, (req, res) => {
   res.json({ nickname: user ? user.nickname : null });
 });
 
+// --- User registration (nickname) ---
+app.post('/api/users', authMiddleware, (req, res) => {
+  const { nickname } = req.body;
+  if (!nickname || nickname.trim().length === 0) {
+    return res.status(400).json({ error: 'Nickname required' });
+  }
+  const uid = req.user.uid;
+  let users = getData(USERS_FILE);
+  if (users.some(u => u.nickname === nickname.trim() && u.uid !== uid)) {
+    return res.status(409).json({ error: 'Nickname already taken' });
+  }
+  const existingUser = users.find(u => u.uid === uid);
+  if (existingUser) {
+    existingUser.nickname = nickname.trim();
+  } else {
+    users.push({ uid, nickname: nickname.trim() });
+  }
+  saveData(USERS_FILE, users);
+  res.json({ success: true, nickname: nickname.trim() });
+});
+
 // --- Create report (protected) ---
 app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
   const { lat, lng, address, time } = req.body;
