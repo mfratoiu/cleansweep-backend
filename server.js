@@ -107,7 +107,9 @@ app.post('/api/users', authMiddleware, (req, res) => {
 });
 
 // --- GET current user’s nickname ---
-app.get('/api/user', authMiddleware, (req, res) => {
+app.get('/api/user', (req, res) => {
+  res.json({ nickname: null, test: 'route is live' });
+});
   const uid = req.user.uid;
   const users = getData(USERS_FILE);
   const user = users.find(u => u.uid === uid);
