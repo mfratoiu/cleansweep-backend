@@ -20,7 +20,7 @@ if (!fs.existsSync('public/uploads')) fs.mkdirSync('public/uploads', { recursive
 const REPORTS_FILE = path.join(__dirname, 'data', 'reports.json');
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
 
-const TWO_WEEKS = 14 * 24 * 60 * 60 * 1000;
+const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
 const CLEANED_DELAY = 24 * 60 * 60 * 1000;
 
 // ---- HELPERS ----
@@ -36,7 +36,11 @@ function saveData(filePath, data) {
 function cleanReports(reports) {
   const now = Date.now();
   return reports.filter(r => {
-    if (r.timestamp && (now - r.timestamp > TWO_WEEKS)) return false;
+    // Do NOT delete reports that have no timestamp (older data)
+    if (!r.timestamp) return true;
+    // Delete if older than 7 days and not cleaned
+    if (!r.cleaned && (now - r.timestamp > ONE_WEEK)) return false;
+    // Delete if cleaned and 24 hours have passed
     if (r.deletionTime && now > r.deletionTime) return false;
     return true;
   });
