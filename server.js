@@ -6,6 +6,24 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const https = require('https');  // or node-fetch if preferred, but using built-in
 
+// ---- Send push notification via Firebase Admin ----
+async function sendPushNotification(fcmToken, title, body) {
+  if (!fcmToken) return;
+  const message = {
+    token: fcmToken,
+    notification: {
+      title: title,
+      body: body
+    }
+  };
+  try {
+    await admin.messaging().send(message);
+    console.log(Push sent to ${fcmToken});
+  } catch (err) {
+    console.error('Failed to send push:', err);
+  }
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -121,6 +139,22 @@ app.get('/api/user', authMiddleware, (req, res) => {
   res.json({ nickname: user ? user.nickname : null });
 });
 
+// --- Update FCM token for current user ---
+app.put('/api/user/token', authMiddleware, (req, res) => {
+  const { fcmToken } = req.body;
+  if (!fcmToken) return res.status(400).json({ error: 'fcmToken required' });
+  const uid = req.user.localId || req.user.uid;
+  let users = getData(USERS_FILE);
+  const user = users.find(u => u.uid === uid);
+  if (user) {
+    user.fcmToken = fcmToken;
+    saveData(USERS_FILE, users);
+    res.json({ success: true });
+  } else {
+    res.status(404).json({ error: 'User not found' });
+  }
+});
+
 app.post('/api/users', authMiddleware, (req, res) => {
   const { nickname } = req.body;
   if (!nickname || nickname.trim().length === 0) {
@@ -207,6 +241,16 @@ app.post('/api/reports/:id/cleaned', authMiddleware, upload.single('photo'), (re
   };
   report.deletionTime = Date.now() + CLEANED_DELAY;
   saveData(REPORTS_FILE, reports);
+
+  // --- Notify the original reporter ---
+  const originalReporterId = report.userId;
+  const users = getData(USERS_FILE);
+  const reporter = users.find(u => u.uid === originalReporterId);
+  if (reporter && reporter.fcmToken) {
+    const notifTitle = 'Your report was cleaned!';
+    const notifBody = ${nickname} marked the trash at ${report.address || 'the location'} as cleaned.;
+    sendPushNotification(reporter.fcmToken, notifTitle, notifBody);
+  }
   res.json(report);
 });
 
