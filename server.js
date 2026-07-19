@@ -6,62 +6,49 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const https = require('https');  // or node-fetch if preferred, but using built-in
 
-// ---- Send push notification via Firebase Admin ----
-async function sendPushNotification(fcmToken, title, body) {
-  if (!fcmToken) return;
+// ---- Send push notification via FCM HTTP v1 (using Web API Key) ----
+async function sendPushNotification(fcmToken, title, body, dataPayload = {}) {
+  if (!fcmToken || !process.env.FIREBASE_API_KEY) return;
+
   const message = {
-    token: fcmToken,
-    notification: {
-      title: title,
-      body: body
+    message: {
+      token: fcmToken,
+      notification: { title, body },
+      data: dataPayload   // contains reportId for deep linking
     }
   };
+
   try {
-    await admin.messaging().send(message);
-    console.log(Push sent to ${fcmToken});
+    const response = await fetch(
+      `https://fcm.googleapis.com/v1/projects/cleansweepsg-f6340/messages:send`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${await getAccessToken()}`
+        },
+        body: JSON.stringify(message)
+      }
+    );
+    const result = await response.json();
+    if (response.ok) console.log('Push sent');
+    else console.error('FCM error:', result);
   } catch (err) {
     console.error('Failed to send push:', err);
   }
 }
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.use(cors());
-app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
-
-// Ensure directories
-if (!fs.existsSync('data')) fs.mkdirSync('data');
-if (!fs.existsSync('public/uploads')) fs.mkdirSync('public/uploads', { recursive: true });
-
-const REPORTS_FILE = path.join(__dirname, 'data', 'reports.json');
-const USERS_FILE = path.join(__dirname, 'data', 'users.json');
-
-const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
-const CLEANED_DELAY = 24 * 60 * 60 * 1000;
-
-// ---- HELPERS ----
-function getData(filePath) {
-  if (!fs.existsSync(filePath)) return [];
-  return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-}
-
-function saveData(filePath, data) {
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-}
-
-function cleanReports(reports) {
-  const now = Date.now();
-  return reports.filter(r => {
-    // Do NOT delete reports that have no timestamp (older data)
-    if (!r.timestamp) return true;
-    // Delete if older than 7 days and not cleaned
-    if (!r.cleaned && (now - r.timestamp > ONE_WEEK)) return false;
-    // Delete if cleaned and 24 hours have passed
-    if (r.deletionTime && now > r.deletionTime) return false;
-    return true;
+// Helper to get OAuth2 access token using the service account (still needed for FCM v1)
+async function getAccessToken() {
+  const { GoogleAuth } = require('google-auth-library');
+  if (!process.env.FIREBASE_SERVICE_ACCOUNT) return null;
+  const auth = new GoogleAuth({
+    credentials: JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT),
+    scopes: ['https://www.googleapis.com/auth/firebase.messaging']
   });
+  const client = await auth.getClient();
+  const token = await client.getAccessToken();
+  return token.token;
 }
 
 // ---- VERIFY FIREBASE TOKEN (REST call, no admin SDK) ----
@@ -138,7 +125,21 @@ app.get('/api/user', authMiddleware, (req, res) => {
   const user = users.find(u => u.uid === uid);
   res.json({ nickname: user ? user.nickname : null });
 });
-
+// --- Update FCM token for current user ---
+app.put('/api/user/token', authMiddleware, (req, res) => {
+  const { fcmToken } = req.body;
+  if (!fcmToken) return res.status(400).json({ error: 'fcmToken required' });
+  const uid = req.user.localId || req.user.uid;
+  let users = getData(USERS_FILE);
+  const user = users.find(u => u.uid === uid);
+  if (user) {
+    user.fcmToken = fcmToken;
+    saveData(USERS_FILE, users);
+    res.json({ success: true });
+  } else {
+    res.status(404).json({ error: 'User not found' });
+  }
+});
 // --- Update FCM token for current user ---
 app.put('/api/user/token', authMiddleware, (req, res) => {
   const { fcmToken } = req.body;
@@ -218,6 +219,17 @@ app.post('/api/reports/:id/comments', authMiddleware, (req, res) => {
 
   report.comments.push({ author, text, timestamp: Date.now() });
   saveData(REPORTS_FILE, reports);
+
+  // --- Notify report owner about new comment ---
+  const reportOwnerId = report.userId;
+  const users = getData(USERS_FILE);
+  const owner = users.find(u => u.uid === reportOwnerId);
+  if (owner && owner.fcmToken && owner.uid !== uid) {  // don't notify if commenter is owner
+    const notifTitle = 'New comment on your report';
+    const notifBody = ${author} commented: ${text};
+    sendPushNotification(owner.fcmToken, notifTitle, notifBody, { reportId: id });
+  }
+  
   res.json(report);
 });
 
@@ -242,6 +254,16 @@ app.post('/api/reports/:id/cleaned', authMiddleware, upload.single('photo'), (re
   report.deletionTime = Date.now() + CLEANED_DELAY;
   saveData(REPORTS_FILE, reports);
 
+// --- Notify original reporter ---
+  const originalReporterId = report.userId;
+  const users = getData(USERS_FILE);
+  const reporter = users.find(u => u.uid === originalReporterId);
+  if (reporter && reporter.fcmToken) {
+    const notifTitle = 'Your report was cleaned!';
+    const notifBody = ${nickname} marked the trash at ${report.address || 'the location'} as cleaned.;
+    sendPushNotification(reporter.fcmToken, notifTitle, notifBody, { reportId: id });
+  }
+  
   // --- Notify the original reporter ---
   const originalReporterId = report.userId;
   const users = getData(USERS_FILE);
