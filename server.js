@@ -16,17 +16,24 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ------------------------------
-// FIREBASE ADMIN SETUP (using service account from env)
+// FIREBASE ADMIN SETUP (manual credential via GoogleAuth)
 // ------------------------------
 let firebaseApp = null;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   try {
     const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    const auth = new GoogleAuth({
+      credentials: serviceAccount,
+      scopes: ['https://www.googleapis.com/auth/firebase.messaging'],
+    });
+
     firebaseApp = admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+      credential: {
+        getAccessToken: () => auth.getAccessToken(),
+      },
       projectId: serviceAccount.project_id || FIREBASE_PROJECT_ID,
     });
-    console.log('🔥 Firebase Admin initialized');
+    console.log('🔥 Firebase Admin initialized (manual credential)');
   } catch (e) {
     console.error('❌ Firebase Admin init error:', e);
   }
