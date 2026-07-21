@@ -302,7 +302,7 @@ app.post('/api/reports/:id/comments', authMiddleware, (req, res) => {
   const owner = users.find(u => u.uid === report.userId);
   if (owner && owner.fcmToken && owner.uid !== uid) {
     const notifTitle = 'New comment on your report';
-    const notifBody = `${author} commented: ${text}`;
+    const notifBody = '${author} commented: ${text}';
     sendPushNotification(owner.fcmToken, notifTitle, notifBody, { reportId: id });
   }
 
@@ -335,7 +335,7 @@ app.post('/api/reports/:id/cleaned', authMiddleware, upload.single('photo'), (re
   const reporter = users.find(u => u.uid === report.userId);
   if (reporter && reporter.fcmToken) {
     const notifTitle = 'Your report was cleaned!';
-    const notifBody = `${nickname} marked the trash at ${report.address || 'the location'} as cleaned.`;
+    const notifBody = '${nickname} marked the trash at ${report.address || 'the location'} as cleaned.';
     sendPushNotification(reporter.fcmToken, notifTitle, notifBody, { reportId: id });
   }
 
