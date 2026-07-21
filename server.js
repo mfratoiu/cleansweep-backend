@@ -6,7 +6,6 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const admin = require('firebase-admin');
 const { GoogleAuth } = require('google-auth-library');
-const nodemailer = require('nodemailer');
 
 // ------------------------------
 //  CONFIG – REPLACE WITH YOUR REAL PROJECT ID
@@ -156,30 +155,43 @@ async function sendPushNotification(fcmToken, title, body, dataPayload = {}) {
 // ------------------------------
 // EMAIL NOTIFICATION FUNCTION
 // ------------------------------
+
 async function sendEmailNotification(subject, text) {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.warn('Email credentials missing, skipping email');
+  const BREVO_API_KEY = process.env.BREVO_API_KEY;
+  if (!BREVO_API_KEY) {
+    console.warn('Brevo API key missing, skipping email');
     return;
   }
 
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
-  });
-
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: 'groqclaw@gamil.com',   // ← change to real NEA email later
+  const payload = {
+    sender: {
+      name: 'CleanSweep SG',
+      email: process.env.BREVO_SENDER_EMAIL || 'noreply@cleansweep.sg'
+    },
+    to: [{
+      email: 'groqclaw@gamil.com',   // change later to NEA address
+      name: 'NEA Officer'
+    }],
     subject: subject,
-    text: text
+    textContent: text
   };
 
   try {
-    await transporter.sendMail(mailOptions);
-    console.log('Email sent to', mailOptions.to);
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'api-key': BREVO_API_KEY
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (response.ok) {
+      console.log('Email sent via Brevo');
+    } else {
+      const errorData = await response.json();
+      console.error('Brevo email error:', errorData);
+    }
   } catch (err) {
     console.error('Email send error:', err);
   }
