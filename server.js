@@ -267,9 +267,9 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
     User: ${nickname}
     Time: ${time || new Date().toLocaleString()}
     Coordinates: ${lat}, ${lng}
-    Photo: https://cleansweep-backend.onrender.com${imageUrl}`;
+    Photo: https://cleansweep-backend.onrender.com${imageUrl};
 
-  sendEmailNotification(emailSubject, emailBody);
+  sendEmailNotification'(emailSubject, emailBody)';
   res.status(201).json(newReport);
 });
 
