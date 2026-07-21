@@ -11,9 +11,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+"google-auth-library": "^9.0.0"
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "firebase-admin": "^14.2.0",
+    "firebase-admin": "^11.11.0",
     "multer": "^2.2.0",
     "uuid": "^14.0.1"
   }
