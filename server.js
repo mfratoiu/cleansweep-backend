@@ -169,7 +169,7 @@ async function sendEmailNotification(subject, text) {
       email: process.env.BREVO_SENDER_EMAIL || 'noreply@cleansweep.sg'
     },
     to: [{
-      email: 'groqclaw@gamil.com',   // change later to NEA address
+      email: 'groqclaw@gmail.com',   // change later to NEA address
       name: 'NEA Officer'
     }],
     subject: subject,
