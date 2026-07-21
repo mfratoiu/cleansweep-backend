@@ -153,9 +153,8 @@ async function sendPushNotification(fcmToken, title, body, dataPayload = {}) {
 }
 
 // ------------------------------
-// EMAIL NOTIFICATION FUNCTION
+// BREVO EMAIL NOTIFICATION FUNCTION
 // ------------------------------
-
 async function sendEmailNotification(subject, text) {
   const BREVO_API_KEY = process.env.BREVO_API_KEY;
   if (!BREVO_API_KEY) {
@@ -169,7 +168,7 @@ async function sendEmailNotification(subject, text) {
       email: process.env.BREVO_SENDER_EMAIL || 'noreply@cleansweep.sg'
     },
     to: [{
-      email: 'groqclaw@gmail.com',   // change later to NEA address
+      email: 'groqclaw@gmail.com',   // ← change to real NEA email later
       name: 'NEA Officer'
     }],
     subject: subject,
