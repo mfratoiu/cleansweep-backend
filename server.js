@@ -86,8 +86,8 @@ async function authMiddleware(req, res, next) {
 
   const idToken = authHeader.split('Bearer ')[1];
   try {
-    const apiKey = process.env.FIREBASE_API_KEY || (firebaseApp ? firebaseApp.options.apiKey : null);
-    if (!apiKey) throw new Error('Missing API key');
+    const apiKey = process.env.FIREBASE_API_KEY;
+    if (!apiKey) throw new Error('Missing FIREBASE_API_KEY');
 
     const response = await fetch(
       `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
@@ -134,37 +134,6 @@ async function sendPushNotification(fcmToken, title, body, dataPayload = {}) {
       },
     };
 
-// ---- Send email notification ----
-async function sendEmailNotification(subject, text) {
-  // Only send if email credentials are set
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.warn('Email credentials missing, skipping email');
-    return;
-  }
-
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
-  });
-
-  const mailOptions = {
-    from: process.env.EMAIL_USER,
-    to: 'groqclaw@gamil.com',   // ← Change this later to your real NEA email
-    subject: subject,
-    text: text
-  };
-
-  try {
-    await transporter.sendMail(mailOptions);
-    console.log('Email sent to', mailOptions.to);
-  } catch (err) {
-    console.error('Email send error:', err);
-  }
-}
-    
     const res = await fetch(
       `https://fcm.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/messages:send`,
       {
@@ -181,6 +150,38 @@ async function sendEmailNotification(subject, text) {
     else console.log('Push sent to', fcmToken);
   } catch (err) {
     console.error('Push send error:', err);
+  }
+}
+
+// ------------------------------
+// EMAIL NOTIFICATION FUNCTION
+// ------------------------------
+async function sendEmailNotification(subject, text) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.warn('Email credentials missing, skipping email');
+    return;
+  }
+
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    }
+  });
+
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: 'groqclaw@gamil.com',   // ← change to real NEA email later
+    subject: subject,
+    text: text
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log('Email sent to', mailOptions.to);
+  } catch (err) {
+    console.error('Email send error:', err);
   }
 }
 
@@ -243,11 +244,12 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
   const user = users.find(u => u.uid === uid);
   const nickname = user ? user.nickname : 'Anonymous';
 
+  const imageUrl = `/uploads/${req.file.filename}`;
   const newReport = {
     id: uuidv4(),
     lat: parseFloat(lat),
     lng: parseFloat(lng),
-    imageUrl: `/uploads/${req.file.filename}`,
+    imageUrl,
     address: address || 'Unknown',
     time: time || new Date().toLocaleString(),
     userId: uid,
@@ -259,17 +261,19 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
   const reports = getData(REPORTS_FILE);
   reports.push(newReport);
   saveData(REPORTS_FILE, reports);
+
   // --- Send email notification about the new report ---
-  const emailSubject = 'New trash report by ${nickname}';
+  const emailSubject = `New trash report by ${nickname}`;
   const emailBody = `A new trash location was reported:
 
     Address: ${address || 'Unknown'}
     User: ${nickname}
     Time: ${time || new Date().toLocaleString()}
     Coordinates: ${lat}, ${lng}
-    Photo: https://cleansweep-backend.onrender.com${imageUrl};
+    Photo: https://cleansweep-backend.onrender.com${imageUrl}`;
 
-  sendEmailNotification'(emailSubject, emailBody)';
+  sendEmailNotification(emailSubject, emailBody);
+
   res.status(201).json(newReport);
 });
 
@@ -301,8 +305,8 @@ app.post('/api/reports/:id/comments', authMiddleware, (req, res) => {
   // Notify report owner (if not the same user)
   const owner = users.find(u => u.uid === report.userId);
   if (owner && owner.fcmToken && owner.uid !== uid) {
-    const notifTitle = 'New comment on your report';
-    const notifBody = '${author} commented: ${text}';
+    const notifTitle = `New comment on your report`;
+    const notifBody = `${author} commented: ${text}`;
     sendPushNotification(owner.fcmToken, notifTitle, notifBody, { reportId: id });
   }
 
@@ -324,7 +328,7 @@ app.post('/api/reports/:id/cleaned', authMiddleware, upload.single('photo'), (re
   if (!report) return res.status(404).json({ error: 'Report not found' });
 
   report.cleaned = {
-    imageUrl: '/uploads/${req.file.filename}',
+    imageUrl: `/uploads/${req.file.filename}`,
     userName: nickname,
     timestamp: Date.now(),
   };
@@ -335,7 +339,7 @@ app.post('/api/reports/:id/cleaned', authMiddleware, upload.single('photo'), (re
   const reporter = users.find(u => u.uid === report.userId);
   if (reporter && reporter.fcmToken) {
     const notifTitle = 'Your report was cleaned!';
-    const notifBody = '${nickname} marked the trash at ${report.address || 'the location'} as cleaned.';
+    const notifBody = `${nickname} marked the trash at ${report.address || 'the location'} as cleaned.`;
     sendPushNotification(reporter.fcmToken, notifTitle, notifBody, { reportId: id });
   }
 
