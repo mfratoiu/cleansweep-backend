@@ -260,7 +260,7 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
   reports.push(newReport);
   saveData(REPORTS_FILE, reports);
   // --- Send email notification about the new report ---
-  const emailSubject = New trash report by ${nickname};
+  const emailSubject = 'New trash report by ${nickname}';
   const emailBody = `A new trash location was reported:
 
     Address: ${address || 'Unknown'}
