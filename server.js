@@ -6,6 +6,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const admin = require('firebase-admin');
 const { GoogleAuth } = require('google-auth-library');
+const nodemailer = require('nodemailer');
 
 // ------------------------------
 //  CONFIG – REPLACE WITH YOUR REAL PROJECT ID
@@ -133,6 +134,37 @@ async function sendPushNotification(fcmToken, title, body, dataPayload = {}) {
       },
     };
 
+// ---- Send email notification ----
+async function sendEmailNotification(subject, text) {
+  // Only send if email credentials are set
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.warn('Email credentials missing, skipping email');
+    return;
+  }
+
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    }
+  });
+
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: 'groqclaw@gamil.com',   // ← Change this later to your real NEA email
+    subject: subject,
+    text: text
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log('Email sent to', mailOptions.to);
+  } catch (err) {
+    console.error('Email send error:', err);
+  }
+}
+    
     const res = await fetch(
       `https://fcm.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/messages:send`,
       {
@@ -227,6 +259,17 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
   const reports = getData(REPORTS_FILE);
   reports.push(newReport);
   saveData(REPORTS_FILE, reports);
+  // --- Send email notification about the new report ---
+  const emailSubject = New trash report by ${nickname};
+  const emailBody = `A new trash location was reported:
+
+    Address: ${address || 'Unknown'}
+    User: ${nickname}
+    Time: ${time || new Date().toLocaleString()}
+    Coordinates: ${lat}, ${lng}
+    Photo: https://cleansweep-backend.onrender.com${imageUrl}`;
+
+  sendEmailNotification(emailSubject, emailBody);
   res.status(201).json(newReport);
 });
 
