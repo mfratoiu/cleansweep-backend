@@ -324,7 +324,7 @@ app.post('/api/reports/:id/cleaned', authMiddleware, upload.single('photo'), (re
   if (!report) return res.status(404).json({ error: 'Report not found' });
 
   report.cleaned = {
-    imageUrl: `/uploads/${req.file.filename}`,
+    imageUrl: '/uploads/${req.file.filename}',
     userName: nickname,
     timestamp: Date.now(),
   };
