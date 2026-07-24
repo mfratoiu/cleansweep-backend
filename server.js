@@ -67,13 +67,9 @@ const getData = (file) => fs.existsSync(file) ? JSON.parse(fs.readFileSync(file,
 const saveData = (file, data) => fs.writeFileSync(file, JSON.stringify(data, null, 2));
 
 function cleanReports(reports) {
-  const now = Date.now();
-  return reports.filter(r => {
-    if (!r.timestamp) return true;                     // keep legacy reports
-    if (r.deletionTime && now > r.deletionTime) return false;   // cleaned & expired
-    if (!r.cleaned && (now - r.timestamp > ONE_WEEK)) return false; // older than 7 days
-    return true;
-  });
+
+  return reports;
+
 }
 
 // ------------------------------
@@ -272,7 +268,7 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
 
   const reports = getData(REPORTS_FILE);
   reports.push(newReport);
-  saveData(REPORTS_FILE, reports);
+ // saveData(REPORTS_FILE, reports); // disabled for debugging
 
   // --- Send email notification about the new report ---
   const emailSubject = `New trash report by ${nickname}`;
@@ -292,7 +288,7 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
 app.get('/api/reports', (req, res) => {
   let reports = getData(REPORTS_FILE);
   reports = cleanReports(reports);
-  saveData(REPORTS_FILE, reports);   // persist cleaned list
+  saveData(REPORTS_FILE, reports); 
   res.json(reports);
 });
 
