@@ -56,7 +56,7 @@ const REPORTS_FILE = path.join(__dirname, 'data', 'reports.json');
 const USERS_FILE = path.join(__dirname, 'data', 'users.json');
 const SPONSOR_STATS_FILE = path.join(__dirname, 'data', 'sponsorStats.json');
 
-// Expiry constants
+// Expiry constants (still defined but not used automatically)
 const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
 const CLEANED_DELAY = 24 * 60 * 60 * 1000;
 
@@ -66,10 +66,10 @@ const CLEANED_DELAY = 24 * 60 * 60 * 1000;
 const getData = (file) => fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf-8')) : [];
 const saveData = (file, data) => fs.writeFileSync(file, JSON.stringify(data, null, 2));
 
+// ** AUTO-DELETION TEMPORARILY DISABLED **
 function cleanReports(reports) {
-
+  // Simply return all reports – no automatic deletion
   return reports;
-
 }
 
 // ------------------------------
@@ -268,7 +268,7 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
 
   const reports = getData(REPORTS_FILE);
   reports.push(newReport);
- // saveData(REPORTS_FILE, reports); // disabled for debugging
+  saveData(REPORTS_FILE, reports);
 
   // --- Send email notification about the new report ---
   const emailSubject = `New trash report by ${nickname}`;
@@ -287,8 +287,8 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
 
 app.get('/api/reports', (req, res) => {
   let reports = getData(REPORTS_FILE);
-  reports = cleanReports(reports);
-  saveData(REPORTS_FILE, reports); 
+  reports = cleanReports(reports);   // currently does nothing
+  // Do NOT save here – we commented out auto-deletion
   res.json(reports);
 });
 
@@ -340,7 +340,7 @@ app.post('/api/reports/:id/cleaned', authMiddleware, upload.single('photo'), (re
     userName: nickname,
     timestamp: Date.now(),
   };
-  report.deletionTime = Date.now() + CLEANED_DELAY;
+  report.deletionTime = Date.now() + CLEANED_DELAY;   // still set, but won't be used until cleanReports is re-enabled
   saveData(REPORTS_FILE, reports);
 
   // Notify original reporter
@@ -364,7 +364,6 @@ function saveSponsorStats(stats) {
   fs.writeFileSync(SPONSOR_STATS_FILE, JSON.stringify(stats, null, 2));
 }
 
-// Record a view for a sponsor
 app.post('/api/sponsors/view', (req, res) => {
   const { sponsorId } = req.body;
   if (!sponsorId) return res.status(400).json({ error: 'sponsorId required' });
@@ -375,7 +374,6 @@ app.post('/api/sponsors/view', (req, res) => {
   res.json({ success: true });
 });
 
-// Record a click for a sponsor
 app.post('/api/sponsors/click', (req, res) => {
   const { sponsorId } = req.body;
   if (!sponsorId) return res.status(400).json({ error: 'sponsorId required' });
@@ -386,7 +384,6 @@ app.post('/api/sponsors/click', (req, res) => {
   res.json({ success: true });
 });
 
-// Optional: Retrieve stats for all sponsors
 app.get('/api/sponsors/stats', (req, res) => {
   res.json(getSponsorStats());
 });
@@ -396,8 +393,8 @@ app.get('/api/sponsors/stats', (req, res) => {
 // ==============================
 app.listen(PORT, () => {
   console.log(`CleanSweep backend running on port ${PORT}`);
-  // Initial cleanup
+  // Initial cleanup (disabled)
   let reports = getData(REPORTS_FILE);
   reports = cleanReports(reports);
-  saveData(REPORTS_FILE, reports);
+  saveData(REPORTS_FILE, reports);   // this will write back the same reports unchanged
 });
