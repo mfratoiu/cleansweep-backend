@@ -360,7 +360,6 @@ app.post('/api/reports/:id/cleaned', authMiddleware, upload.single('photo'), (re
 });
 
 // ----- Sponsor Stats -----
-const SPONSOR_STATS_FILE = path.join(__dirname, 'data', 'sponsorStats.json');
 
 function getSponsorStats() {
   if (!fs.existsSync(SPONSOR_STATS_FILE)) return {};
