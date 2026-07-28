@@ -360,7 +360,6 @@ app.post('/api/reports/:id/cleaned', authMiddleware, upload.single('photo'), (re
 });
 
 // ----- Sponsor Stats -----
-
 function getSponsorStats() {
   if (!fs.existsSync(SPONSOR_STATS_FILE)) return {};
   return JSON.parse(fs.readFileSync(SPONSOR_STATS_FILE, 'utf-8'));
@@ -370,9 +369,8 @@ function saveSponsorStats(stats) {
   fs.writeFileSync(SPONSOR_STATS_FILE, JSON.stringify(stats, null, 2));
 }
 
-// Record a view for a sponsor
 app.post('/api/sponsors/view', (req, res) => {
-  const { sponsorId } = req.body;   // e.g. "platinum-0"
+  const { sponsorId } = req.body;
   if (!sponsorId) return res.status(400).json({ error: 'sponsorId required' });
   const stats = getSponsorStats();
   if (!stats[sponsorId]) stats[sponsorId] = { views: 0, clicks: 0 };
@@ -381,6 +379,15 @@ app.post('/api/sponsors/view', (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/sponsors/click', (req, res) => {
+  const { sponsorId } = req.body;
+  if (!sponsorId) return res.status(400).json({ error: 'sponsorId required' });
+  const stats = getSponsorStats();
+  if (!stats[sponsorId]) stats[sponsorId] = { views: 0, clicks: 0 };
+  stats[sponsorId].clicks++;
+  saveSponsorStats(stats);
+  res.json({ success: true });
+});
 
 app.get('/api/sponsors/stats', (req, res) => {
   res.json(getSponsorStats());
