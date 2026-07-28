@@ -66,9 +66,14 @@ const CLEANED_DELAY = 24 * 60 * 60 * 1000;
 const getData = (file) => fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf-8')) : [];
 const saveData = (file, data) => fs.writeFileSync(file, JSON.stringify(data, null, 2));
 
-// ** AUTO-DELETION TEMPORARILY DISABLED **
+
 function cleanReports(reports) {
-  // Simply return all reports – no automatic deletion
+
+  // * AUTO-DELETION PERMANENTLY DISABLED *
+  // No reports are ever removed automatically.
+  // The 'cleaned' flag and 'deletionTime' are still set when a user marks a report as cleaned,
+  // but they are not used to delete anything.
+
   return reports;
 }
 
@@ -287,8 +292,8 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
 
 app.get('/api/reports', (req, res) => {
   let reports = getData(REPORTS_FILE);
-  reports = cleanReports(reports);   // currently does nothing
-  // Do NOT save here – we commented out auto-deletion
+  reports = cleanReports(reports);   
+  // Do NOT save the reports back after cleaning - no data loss
   res.json(reports);
 });
 
