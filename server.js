@@ -413,6 +413,30 @@ app.get('/api/sponsors/stats', (req, res) => {
 // ==============================
 // START SERVER
 // ==============================
+
+app.post('/api/report', authMiddleware, async (req, res) => {
+  const { type, reportId, reportedUserName, imageUrl } = req.body;   // type: 'user' or 'photo'
+  if (!type || !reportId) return res.status(400).json({ error: 'Missing report details' });
+
+  // Get the reporter's nickname
+  const uid = req.user.localId || req.user.uid;
+  const users = getData(USERS_FILE);
+  const reporter = users.find(u => u.uid === uid);
+  const reporterNickname = reporter ? reporter.nickname : 'Anonymous';
+
+  let subject, body;
+  if (type === 'user') {
+    subject = User Report: ${reportedUserName};
+    body = User ${reporterNickname} reported user: ${reportedUserName}\nReport ID: ${reportId};
+  } else { // 'photo'
+    subject = Photo Report: Report ID ${reportId};
+    body = User ${reporterNickname} reported this photo:\n${imageUrl};
+  }
+
+  await sendEmailNotification(subject, body);
+  res.json({ success: true });
+});
+
 app.listen(PORT, () => {
   console.log(`CleanSweep backend running on port ${PORT}`);
   // Initial cleanup (disabled)
