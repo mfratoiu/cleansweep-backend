@@ -78,14 +78,14 @@ function cleanReports(reports) {
 
     // If a report is cleaned and its deletionTime has passed, remove it
     if (r.cleaned && r.deletionTime && now > r.deletionTime) {
-      console.log(🗑️ Removing cleaned report ${r.id} – 24h after cleaning);
+      console.log('[CLEANED] Removing report ' + r.id + ' - 24h after cleaning');
       return false;
     }
 
     // If a report is not cleaned and older than 7 days, remove it
     if (!r.cleaned && (now - r.timestamp > oneWeek)) {
       const ageDays = Math.round((now - r.timestamp) / oneDay);
-      console.log(⏳ Removing old report ${r.id} – age ${ageDays} days);
+      console.log('[OLD] Removing report ' + r.id + ' - age ' + ageDays + ' days');
       return false;
     }
 
