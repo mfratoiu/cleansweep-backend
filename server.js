@@ -415,10 +415,9 @@ app.get('/api/sponsors/stats', (req, res) => {
 // ==============================
 
 app.post('/api/report', authMiddleware, async (req, res) => {
-  const { type, reportId, reportedUserName, imageUrl } = req.body;   // type: 'user' or 'photo'
+  const { type, reportId, reportedUserName, imageUrl } = req.body;
   if (!type || !reportId) return res.status(400).json({ error: 'Missing report details' });
 
-  // Get the reporter's nickname
   const uid = req.user.localId || req.user.uid;
   const users = getData(USERS_FILE);
   const reporter = users.find(u => u.uid === uid);
@@ -428,7 +427,7 @@ app.post('/api/report', authMiddleware, async (req, res) => {
   if (type === 'user') {
     subject = User Report: ${reportedUserName};
     body = User ${reporterNickname} reported user: ${reportedUserName}\nReport ID: ${reportId};
-  } else { // 'photo'
+  } else {
     subject = Photo Report: Report ID ${reportId};
     body = User ${reporterNickname} reported this photo:\n${imageUrl};
   }
