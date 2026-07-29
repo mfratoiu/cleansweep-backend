@@ -68,13 +68,29 @@ const saveData = (file, data) => fs.writeFileSync(file, JSON.stringify(data, nul
 
 
 function cleanReports(reports) {
+  const now = Date.now();
+  const oneWeek = 7 * 24 * 60 * 60 * 1000;
+  const oneDay = 24 * 60 * 60 * 1000;
 
-  // * AUTO-DELETION PERMANENTLY DISABLED *
-  // No reports are ever removed automatically.
-  // The 'cleaned' flag and 'deletionTime' are still set when a user marks a report as cleaned,
-  // but they are not used to delete anything.
+  return reports.filter(r => {
+    // Keep legacy reports that have no timestamp
+    if (!r.timestamp) return true;
 
-  return reports;
+    // If a report is cleaned and its deletionTime has passed, remove it
+    if (r.cleaned && r.deletionTime && now > r.deletionTime) {
+      console.log(🗑️ Removing cleaned report ${r.id} – 24h after cleaning);
+      return false;
+    }
+
+    // If a report is not cleaned and older than 7 days, remove it
+    if (!r.cleaned && (now - r.timestamp > oneWeek)) {
+      const ageDays = Math.round((now - r.timestamp) / oneDay);
+      console.log(⏳ Removing old report ${r.id} – age ${ageDays} days);
+      return false;
+    }
+
+    return true;
+  });
 }
 
 // ------------------------------
@@ -292,8 +308,9 @@ app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
 
 app.get('/api/reports', (req, res) => {
   let reports = getData(REPORTS_FILE);
-  reports = cleanReports(reports);   
-  // Do NOT save the reports back after cleaning - no data loss
+  reports = cleanReports(reports);
+  // Save the cleaned list back – this is the only place where auto‑deletion happens
+  saveData(REPORTS_FILE, reports);
   res.json(reports);
 });
 
