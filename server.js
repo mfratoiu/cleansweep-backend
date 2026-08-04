@@ -258,13 +258,16 @@ app.post('/api/users', authMiddleware, (req, res) => {
   if (users.some(u => u.nickname === nickname.trim() && u.uid !== uid))
     return res.status(409).json({ error: 'Nickname already taken' });
 
-  
-const existing = users.find(u => u.uid === uid);
+  const existing = users.find(u => u.uid === uid);
 if (existing) {
   return res.status(409).json({ error: 'Nickname already set and cannot be changed.' });
 } else {
   users.push({ uid, nickname: nickname.trim() });
+  saveData(USERS_FILE, users);
+  res.json({ success: true, nickname: nickname.trim() });
 }
+});
+
 
 // ----- Reports -----
 app.post('/api/reports', authMiddleware, upload.single('photo'), (req, res) => {
