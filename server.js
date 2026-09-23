@@ -74,9 +74,16 @@ async function getAllReports() {
 async function uploadPhoto(fileBuffer, originalname, mimetype) {
   const filename = `uploads/${uuidv4()}${path.extname(originalname || '') || '.jpg'}`;
   const file = bucket.file(filename);
-  await file.save(fileBuffer, { metadata: { contentType: mimetype }, resumable: false });
-  await file.makePublic();
-  return `https://storage.googleapis.com/${bucket.name}/${filename}`;
+  const downloadToken = uuidv4();
+  await file.save(fileBuffer, {
+    metadata: {
+      contentType: mimetype,
+      metadata: { firebaseStorageDownloadTokens: downloadToken },
+    },
+    resumable: false,
+  });
+  const encodedPath = encodeURIComponent(filename);
+  return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${downloadToken}`;
 }
 
 // ------------------------------
@@ -448,4 +455,3 @@ app.listen(PORT, async () => {
     } catch (e) { console.error('Startup cleanup failed:', e); }
   }
 });
-
