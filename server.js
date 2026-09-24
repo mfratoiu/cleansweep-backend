@@ -420,27 +420,171 @@ app.get('/api/sponsors/stats', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// ----- Report user or photo -----
+// ----- Report user or photo → moderation queue (+ email, as before) -----
+const flagsCol = () => db.collection('flags');
+
 app.post('/api/report', authMiddleware, async (req, res) => {
-  const { type, reportId, reportedUserName, imageUrl } = req.body;
-  if (!type || !reportId) return res.status(400).json({ error: 'Missing report details' });
+  const { type, reportId, reportedUserName } = req.body;
+  if (!['user', 'photo'].includes(type) || !/^[\w-]{1,100}$/.test(reportId || ''))
+    return res.status(400).json({ error: 'Missing report details' });
   try {
     const uid = req.user.localId || req.user.uid;
     const reporter = await getUserByUid(uid);
     const reporterNickname = reporter ? reporter.nickname : 'Anonymous';
+    const repSnap = await reportsCol().doc(reportId).get();
+    const rep = repSnap.exists ? repSnap.data() : {};
 
-    let subject, body;
-    if (type === 'user') {
-      subject = 'User Report: ' + reportedUserName;
-      body = 'User ' + reporterNickname + ' reported user: ' + reportedUserName + '\nReport ID: ' + reportId;
-    } else {
-      subject = 'Photo Report: Report ID ' + reportId;
-      body = 'User ' + reporterNickname + ' reported this photo:\n' + imageUrl;
+    let isNew = true;
+    try {
+      // one flag per reporter per target; repeats are silently ignored
+      await flagsCol().doc(`${type}_${reportId}_${uid}`).create({
+        type, reportId,
+        reportedUserId: rep.userId || null,
+        reportedUserName: rep.userName || reportedUserName || 'Unknown',
+        imageUrl: type === 'photo' ? (rep.imageUrl || null) : null,
+        address: rep.address || null,
+        reporterUid: uid, reporterNickname,
+        status: 'open', createdAt: Date.now(),
+      });
+    } catch (e) { if (e.code === 6) isNew = false; else throw e; }
+
+    if (isNew) {
+      const target = rep.userName || reportedUserName || 'Unknown';
+      sendEmailNotification(
+        type === 'user' ? 'User Report: ' + target : 'Photo Report: Report ID ' + reportId,
+        reporterNickname + ' reported ' + (type === 'user' ? 'user ' + target : 'a photo (' + (rep.imageUrl || 'n/a') + ')') + '\nReport ID: ' + reportId + '\nReview it in the admin site.'
+      );
     }
-
-    await sendEmailNotification(subject, body);
     res.json({ success: true });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// Delete a report AND its photo files from Storage
+function storagePathFromUrl(url) {
+  const m = /\/o\/([^?]+)/.exec(url || '');
+  return m ? decodeURIComponent(m[1]) : null;
+}
+async function removeReportFully(id) {
+  const ref = reportsCol().doc(id);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+  const r = snap.data();
+  for (const u of [r.imageUrl, r.cleaned && r.cleaned.imageUrl]) {
+    const p = storagePathFromUrl(u);
+    if (p && p.startsWith('uploads/')) await bucket.file(p).delete().catch(() => {});
+  }
+  await ref.delete();
+}
+
+// ==============================
+// ADMIN API — only the verified Google/email account below gets in
+// ==============================
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'muckibo@gmail.com').toLowerCase();
+function adminMiddleware(req, res, next) {
+  authMiddleware(req, res, () => {
+    const u = req.user || {};
+    if ((u.email || '').toLowerCase() === ADMIN_EMAIL && u.emailVerified) return next();
+    return res.status(403).json({ error: 'Forbidden' });
+  });
+}
+const adminErr = (res, e) => { console.error(e); res.status(500).json({ error: 'Server error' }); };
+
+app.get('/api/admin/stats', adminMiddleware, async (req, res) => {
+  try {
+    const [reports, usersSnap, spSnap, flagSnap] = await Promise.all([getAllReports(), usersCol().get(), sponsorStatsCol().get(), flagsCol().where('status', '==', 'open').get()]);
+    const now = Date.now(), perDay = Array(14).fill(0);
+    let cleaned = 0, comments = 0, views = 0, clicks = 0;
+    reports.forEach(r => {
+      if (r.cleaned) cleaned++;
+      comments += (r.comments || []).length;
+      const i = 13 - Math.floor((now - r.timestamp) / 86400000);
+      if (i >= 0 && i < 14) perDay[i]++;
+    });
+    spSnap.docs.forEach(d => { views += d.data().views || 0; clicks += d.data().clicks || 0; });
+    res.json({ users: usersSnap.size, reports: reports.length, open: reports.length - cleaned, cleaned, comments, sponsorViews: views, sponsorClicks: clicks, perDay, openFlags: new Set(flagSnap.docs.map(d => d.data().type + d.data().reportId)).size });
+  } catch (e) { adminErr(res, e); }
+});
+
+app.get('/api/admin/reports', adminMiddleware, async (req, res) => {
+  try { res.json((await getAllReports()).sort((a, b) => b.timestamp - a.timestamp)); } catch (e) { adminErr(res, e); }
+});
+
+app.delete('/api/admin/reports/:id', adminMiddleware, async (req, res) => {
+  try { await removeReportFully(req.params.id); res.json({ success: true }); } catch (e) { adminErr(res, e); }
+});
+
+app.delete('/api/admin/reports/:id/comments/:ts', adminMiddleware, async (req, res) => {
+  try {
+    const ref = reportsCol().doc(req.params.id);
+    const snap = await ref.get();
+    if (!snap.exists) return res.status(404).json({ error: 'Report not found' });
+    const comments = (snap.data().comments || []).filter(c => String(c.timestamp) !== req.params.ts);
+    await ref.update({ comments });
+    res.json({ success: true });
+  } catch (e) { adminErr(res, e); }
+});
+
+app.get('/api/admin/users', adminMiddleware, async (req, res) => {
+  try {
+    const [usersSnap, reports] = await Promise.all([usersCol().get(), getAllReports()]);
+    const counts = {};
+    reports.forEach(r => { counts[r.userId] = (counts[r.userId] || 0) + 1; });
+    res.json(usersSnap.docs.map(d => ({ uid: d.id, ...d.data(), fcmToken: undefined, reports: counts[d.id] || 0 })));
+  } catch (e) { adminErr(res, e); }
+});
+
+app.post('/api/admin/users/:uid/disable', adminMiddleware, async (req, res) => {
+  const { uid } = req.params, disabled = !!req.body.disabled;
+  if (uid === req.user.localId) return res.status(400).json({ error: 'Cannot disable yourself' });
+  try {
+    await admin.auth().updateUser(uid, { disabled });
+    if (disabled) await admin.auth().revokeRefreshTokens(uid);
+    await usersCol().doc(uid).set({ disabled }, { merge: true });
+    res.json({ success: true });
+  } catch (e) { adminErr(res, e); }
+});
+
+app.delete('/api/admin/users/:uid', adminMiddleware, async (req, res) => {
+  const { uid } = req.params;
+  if (uid === req.user.localId) return res.status(400).json({ error: 'Cannot delete yourself' });
+  try {
+    await admin.auth().deleteUser(uid).catch(() => {});
+    await usersCol().doc(uid).delete();
+    res.json({ success: true });
+  } catch (e) { adminErr(res, e); }
+});
+
+app.get('/api/admin/flags', adminMiddleware, async (req, res) => {
+  try {
+    const snap = await flagsCol().orderBy('createdAt', 'desc').limit(300).get();
+    res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  } catch (e) { adminErr(res, e); }
+});
+
+app.post('/api/admin/flags/:id/resolve', adminMiddleware, async (req, res) => {
+  const deleteReport = !!req.body.deleteReport, disableUser = !!req.body.disableUser;
+  try {
+    const snap = await flagsCol().doc(req.params.id).get();
+    if (!snap.exists) return res.status(404).json({ error: 'Flag not found' });
+    const f = snap.data(), actions = [];
+    if (disableUser) {
+      if (!f.reportedUserId) return res.status(400).json({ error: 'User unknown (report already expired)' });
+      if (f.reportedUserId === req.user.localId) return res.status(400).json({ error: 'Cannot disable yourself' });
+      await admin.auth().updateUser(f.reportedUserId, { disabled: true });
+      await admin.auth().revokeRefreshTokens(f.reportedUserId);
+      await usersCol().doc(f.reportedUserId).set({ disabled: true }, { merge: true });
+      actions.push('user disabled');
+    }
+    if (deleteReport) { await removeReportFully(f.reportId); actions.push('report deleted'); }
+
+    // close every open flag this decision covers
+    const open = await flagsCol().where('reportId', '==', f.reportId).where('status', '==', 'open').get();
+    const batch = db.batch();
+    open.docs.filter(d => deleteReport || d.data().type === f.type).forEach(d =>
+      batch.update(d.ref, { status: actions.length ? 'resolved' : 'dismissed', action: actions.join(' + ') || 'dismissed', resolvedAt: Date.now() }));
+    await batch.commit();
+    res.json({ success: true });
+  } catch (e) { adminErr(res, e); }
 });
 
 // ==============================
@@ -455,4 +599,3 @@ app.listen(PORT, async () => {
     } catch (e) { console.error('Startup cleanup failed:', e); }
   }
 });
-
