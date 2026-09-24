@@ -239,8 +239,8 @@ app.get('/api/user', authMiddleware, async (req, res) => {
 });
 
 app.put('/api/user/token', authMiddleware, async (req, res) => {
-  const { fcmToken } = req.body;
-  if (!fcmToken) return res.status(400).json({ error: 'fcmToken required' });
+  const { fcmToken } = req.body; // fcmToken may be null (user disabling notifications) — only undefined is invalid
+  if (fcmToken === undefined) return res.status(400).json({ error: 'fcmToken required' });
   try {
     const uid = req.user.localId;
     const userDoc = usersCol().doc(uid);
