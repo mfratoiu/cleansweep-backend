@@ -476,6 +476,19 @@ async function removeReportFully(id) {
   await ref.delete();
 }
 
+// Delete my own account: reports (+photos), profile, and login
+app.delete('/api/account', authMiddleware, async (req, res) => {
+  const uid = req.user.localId || req.user.uid;
+  if ((req.user.email || '').toLowerCase() === ADMIN_EMAIL) return res.status(400).json({ error: 'Admin account cannot be deleted here' });
+  try {
+    const mine = await reportsCol().where('userId', '==', uid).get();
+    for (const d of mine.docs) await removeReportFully(d.id);
+    await usersCol().doc(uid).delete();
+    await admin.auth().deleteUser(uid).catch(() => {});
+    res.json({ success: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Server error' }); }
+});
+
 // ==============================
 // ADMIN API — only the verified Google/email account below gets in
 // ==============================
